@@ -123,6 +123,10 @@ export async function isLlmCached(model) {
 }
 
 /** onProgress({ stage: 'download', value: 0..1, text }) while the model loads. */
+export async function downloadWritingModel(model, onProgress) {
+  await getLlm(model, onProgress)
+}
+
 async function getLlm(model, onProgress = () => {}) {
   const id = await resolveLlmModel(model)
   if (llm && llmModel === id) return llm
@@ -226,7 +230,8 @@ function friendlyError(message, model) {
   const text = String(message || '')
   if (/fetch|network|load failed|ERR_|CORS/i.test(text)) {
     return new Error(
-      `Could not download the ${model} model. The first time, this browser needs internet access to huggingface.co; after that it works from the browser's cache.`,
+      `Could not download the ${model} model. Check your internet connection and try again.`,
+      { cause: message },
     )
   }
   if (/memory|OOM|allocation/i.test(text)) {

@@ -30,6 +30,11 @@
 
     <p v-if="error" role="alert" class="border-b border-outline-gray-1 bg-surface-red-1 px-4 py-2 text-sm text-ink-red-7">{{ error }}</p>
 
+    <div v-if="canWriteHere && !llmCached" class="flex flex-wrap items-center gap-3 border-b border-outline-gray-1 px-4 py-3">
+      <Button label="Download writing model" :disabled="!!job" @click="downloadWritingModel" />
+      <p class="text-sm text-ink-gray-6">The first download uses about 1 GB. This browser can reuse it for other recordings.</p>
+    </div>
+
     <div class="p-4" @click="onContentClick">
       <!-- Assistant -->
       <template v-if="tab === 'assistant'">
@@ -185,7 +190,9 @@ const elapsedText = computed(() => engine.formatTime(job.value ? (now.value - jo
 const jobTitle = computed(() => {
   const j = job.value
   if (!j) return ''
-  if (j.stage === 'download') return j.kind === 'transcript' ? 'Downloading the speech model' : 'Downloading the writing model'
+  if (j.stage === 'download' || j.kind === 'model') {
+    return j.kind === 'transcript' ? 'Loading the speech model' : 'Loading the writing model'
+  }
   return {
     transcript: 'Creating your transcript',
     insights: 'Writing the summary and highlights',
@@ -200,7 +207,7 @@ const jobDetail = computed(() => {
   return {
     fetch: 'Loading the video',
     decode: 'Reading the sound',
-    download: 'Only the first time; the browser keeps it for next time.',
+    download: j.text || 'Checking the browser cache and downloading any missing files.',
     transcribe: 'Listening to the recording',
     write: 'Reading your transcript and video timeline',
   }[j.stage] || ''
@@ -245,7 +252,7 @@ function startJob(kind) {
 }
 
 function onProgress(p) {
-  if (job.value) Object.assign(job.value, { stage: p.stage, value: p.value ?? job.value.value })
+  if (job.value) Object.assign(job.value, { stage: p.stage, value: p.value ?? job.value.value, text: p.text })
 }
 
 function endJob() {
@@ -271,6 +278,20 @@ async function runTranscript() {
     tab.value = 'transcript'
   } catch (e) {
     await fail('transcript', e)
+  } finally {
+    endJob()
+  }
+}
+
+async function downloadWritingModel() {
+  if (job.value || !canWriteHere.value || llmCached.value) return
+  startJob('model')
+  try {
+    await engine.downloadWritingModel(config.value.llm_model, onProgress)
+    llmCached.value = true
+    toast.success('Writing model is ready')
+  } catch (e) {
+    error.value = errorMessage(e)
   } finally {
     endJob()
   }
@@ -387,10 +408,10 @@ const StepState = defineComponent({
         )
       }
       const label = stepProps.kind === 'sop' ? 'Create SOP' : 'Write summary'
-      const note = canWriteHere.value && !llmCached.value ? 'The first time, this downloads the writing model (about 1 GB) and keeps it in this browser.' : ''
       return h('div', { class: 'flex flex-col items-start gap-3' }, [
-        status === 'Failed' ? p(ai.value.ai_error || 'That did not work.', 'text-base text-ink-red-7') : null,
-        note ? p(note, 'text-sm text-ink-gray-5') : null,
+        status === 'Failed' && (!error.value || ai.value.ai_error !== error.value)
+          ? p(ai.value.ai_error || 'That did not work.', 'text-base text-ink-red-7')
+          : null,
         h(Button, {
           variant: 'solid',
           iconLeft: 'lucide-sparkles',
