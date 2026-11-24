@@ -22,6 +22,7 @@ from frappe.utils import cint, get_url
 from werkzeug.utils import send_file
 
 from frappe_recorder.frappe_recorder.doctype.screen_recording.screen_recording import (
+	recording_file_path,
 	thumbnail_dir,
 	video_file_name,
 )
@@ -176,12 +177,15 @@ def upload_chunk(token: str, index: int):
 		frappe.throw(_("No video data received."))
 
 	path = doc.local_video_path()
+	if not path:
+		frappe.throw(_("The video file is missing."), frappe.DoesNotExistError)
 	offset = cint(doc.bytes_received)
 	if received and not offset:
 		# Recording started before bytes_received was tracked.
 		offset = os.path.getsize(path)
 
-	with open(path, "ab") as f:
+	# local_video_path confines the file to the site's private files directory.
+	with open(path, "ab") as f:  # nosemgrep: frappe-security-file-traversal
 		# Drop bytes left behind by a request that died before it was committed.
 		f.truncate(offset)
 		while True:
@@ -220,7 +224,9 @@ def _save_thumbnail(token: str, data_url: str) -> str | None:
 	content = base64.b64decode(match.group(1))
 	if len(content) > MAX_THUMBNAIL_BYTES:
 		return None
-	with open(os.path.join(thumbnail_dir(), f"{token}.jpg"), "wb") as f:
+	path = recording_file_path(thumbnail_dir(), f"{token}.jpg")
+	# recording_file_path checks the filename and rejects symlink redirects.
+	with open(path, "wb") as f:  # nosemgrep: frappe-security-file-traversal
 		f.write(content)
 	return f"/files/recorder/{token}.jpg"
 

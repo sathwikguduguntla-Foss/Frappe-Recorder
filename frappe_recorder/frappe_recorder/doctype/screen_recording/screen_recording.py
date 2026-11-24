@@ -5,6 +5,7 @@ import hashlib
 import os
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 
 TOKEN_LENGTH = 12
@@ -26,12 +27,13 @@ class ScreenRecording(Document):
 	def local_video_path(self) -> str | None:
 		if not self.video_file:
 			return None
-		return os.path.join(video_dir(), os.path.basename(self.video_file))
+		return recording_file_path(video_dir(), self.video_file)
 
 	def local_thumbnail_path(self) -> str | None:
 		if not self.thumbnail or not self.thumbnail.startswith("/files/recorder/"):
 			return None
-		return os.path.join(thumbnail_dir(), os.path.basename(self.thumbnail))
+		filename = self.thumbnail.removeprefix("/files/recorder/")
+		return recording_file_path(thumbnail_dir(), filename)
 
 	def has_local_video(self) -> bool:
 		path = self.local_video_path()
@@ -102,6 +104,16 @@ def thumbnail_dir() -> str:
 	return path
 
 
+def recording_file_path(directory: str, filename: str) -> str:
+	if not filename or filename in {".", ".."} or "/" in filename or "\\" in filename:
+		frappe.throw(_("Invalid recording file path."))
+
+	path = os.path.join(os.path.realpath(directory), filename)
+	if os.path.realpath(path) != path:
+		frappe.throw(_("Invalid recording file path."))
+	return path
+
+
 def recordings_folder() -> str:
 	name = f"Home/{FILE_FOLDER}"
 	if not frappe.db.exists("File", name):
@@ -113,7 +125,8 @@ def recordings_folder() -> str:
 
 def file_hash(path: str) -> str:
 	digest = hashlib.md5(usedforsecurity=False)
-	with open(path, "rb") as f:
+	# The caller resolves the path with local_video_path before hashing.
+	with open(path, "rb") as f:  # nosemgrep: frappe-security-file-traversal
 		while data := f.read(1024 * 1024):
 			digest.update(data)
 	return digest.hexdigest()
